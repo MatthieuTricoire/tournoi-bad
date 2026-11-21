@@ -9,21 +9,29 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminRankingRouteImport } from './routes/admin/ranking'
 import { Route as AdminPlayersRouteImport } from './routes/admin/players'
+import { Route as AppReglagesRouteImport } from './routes/_app.reglages'
+import { Route as AppJoueursRouteImport } from './routes/_app.joueurs'
+import { Route as AppClassementRouteImport } from './routes/_app.classement'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/admin/',
   path: '/admin/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
   id: '/admin/settings',
@@ -40,50 +48,90 @@ const AdminPlayersRoute = AdminPlayersRouteImport.update({
   path: '/admin/players',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppReglagesRoute = AppReglagesRouteImport.update({
+  id: '/reglages',
+  path: '/reglages',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppJoueursRoute = AppJoueursRouteImport.update({
+  id: '/joueurs',
+  path: '/joueurs',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppClassementRoute = AppClassementRouteImport.update({
+  id: '/classement',
+  path: '/classement',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AppIndexRoute
+  '/classement': typeof AppClassementRoute
+  '/joueurs': typeof AppJoueursRoute
+  '/reglages': typeof AppReglagesRoute
   '/admin/players': typeof AdminPlayersRoute
   '/admin/ranking': typeof AdminRankingRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/': typeof AdminIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
+  '/classement': typeof AppClassementRoute
+  '/joueurs': typeof AppJoueursRoute
+  '/reglages': typeof AppReglagesRoute
   '/admin/players': typeof AdminPlayersRoute
   '/admin/ranking': typeof AdminRankingRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/': typeof AppIndexRoute
   '/admin': typeof AdminIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/_app/classement': typeof AppClassementRoute
+  '/_app/joueurs': typeof AppJoueursRoute
+  '/_app/reglages': typeof AppReglagesRoute
   '/admin/players': typeof AdminPlayersRoute
   '/admin/ranking': typeof AdminRankingRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/_app/': typeof AppIndexRoute
   '/admin/': typeof AdminIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/classement'
+    | '/joueurs'
+    | '/reglages'
     | '/admin/players'
     | '/admin/ranking'
     | '/admin/settings'
     | '/admin/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin/players' | '/admin/ranking' | '/admin/settings' | '/admin'
-  id:
-    | '__root__'
-    | '/'
+  to:
+    | '/classement'
+    | '/joueurs'
+    | '/reglages'
     | '/admin/players'
     | '/admin/ranking'
     | '/admin/settings'
+    | '/'
+    | '/admin'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/_app/classement'
+    | '/_app/joueurs'
+    | '/_app/reglages'
+    | '/admin/players'
+    | '/admin/ranking'
+    | '/admin/settings'
+    | '/_app/'
     | '/admin/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
   AdminPlayersRoute: typeof AdminPlayersRoute
   AdminRankingRoute: typeof AdminRankingRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
@@ -92,11 +140,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -105,6 +153,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
     }
     '/admin/settings': {
       id: '/admin/settings'
@@ -127,11 +182,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPlayersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/reglages': {
+      id: '/_app/reglages'
+      path: '/reglages'
+      fullPath: '/reglages'
+      preLoaderRoute: typeof AppReglagesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/joueurs': {
+      id: '/_app/joueurs'
+      path: '/joueurs'
+      fullPath: '/joueurs'
+      preLoaderRoute: typeof AppJoueursRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/classement': {
+      id: '/_app/classement'
+      path: '/classement'
+      fullPath: '/classement'
+      preLoaderRoute: typeof AppClassementRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppClassementRoute: typeof AppClassementRoute
+  AppJoueursRoute: typeof AppJoueursRoute
+  AppReglagesRoute: typeof AppReglagesRoute
+  AppIndexRoute: typeof AppIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppClassementRoute: AppClassementRoute,
+  AppJoueursRoute: AppJoueursRoute,
+  AppReglagesRoute: AppReglagesRoute,
+  AppIndexRoute: AppIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
   AdminPlayersRoute: AdminPlayersRoute,
   AdminRankingRoute: AdminRankingRoute,
   AdminSettingsRoute: AdminSettingsRoute,

@@ -2,18 +2,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { eq } from "drizzle-orm";
 import z from "zod";
 import { db } from "#/db";
-import { players } from "#/db/schema";
+import { matchParticipants, players } from "#/db/schema";
+import { closeCompletedTournament } from "#/server/tournament-state";
 
 const playerSchema = z.object({
 	firstname: z
 		.string()
 		.min(2, "Le prénom est trop court")
 		.max(50, "Le prénom est trop long"),
-	lastname: z
-		.string()
-		.max(50, "Le nom est trop long")
-		.optional()
-		.default(""),
+	lastname: z.string().max(50, "Le nom est trop long").optional().default(""),
 	gender: z.enum(["M", "F"]).optional().default("M"),
 });
 
@@ -35,10 +32,16 @@ export const togglePlayerPresence = createServerFn({
 })
 	.inputValidator(z.object({ playerId: z.number(), isPresent: z.boolean() }))
 	.handler(async ({ data }) => {
-		await db
-			.update(players)
-			.set({ present: data.isPresent })
-			.where(eq(players.id, data.playerId));
+		await db.transaction(async (tx) => {
+			await tx
+				.update(players)
+				.set({ present: data.isPresent })
+				.where(eq(players.id, data.playerId))
+				.run();
+			// A departure may complete the new reference population. Reuse the
+			// same pending-match guard and never reopen a finished tournament.
+			await closeCompletedTournament(tx);
+		});
 
 		return { success: true };
 	});
@@ -46,7 +49,18 @@ export const togglePlayerPresence = createServerFn({
 export const deletePlayer = createServerFn({ method: "POST" })
 	.inputValidator(z.object({ playerId: z.number() }))
 	.handler(async ({ data }) => {
-		await db.delete(players).where(eq(players.id, data.playerId));
+		await db.transaction(async (tx) => {
+			const participant = await tx
+				.select({ id: matchParticipants.id })
+				.from(matchParticipants)
+				.where(eq(matchParticipants.playerId, data.playerId))
+				.get();
+			if (participant)
+				throw new Error(
+					"Ce joueur a déjà participé à un match. Marquez-le absent pour les prochaines rotations.",
+				);
+			await tx.delete(players).where(eq(players.id, data.playerId)).run();
+		});
 		return { success: true };
 	});
 

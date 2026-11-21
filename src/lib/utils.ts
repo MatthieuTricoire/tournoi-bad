@@ -6,153 +6,89 @@ export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
 
-type PlayerInput = {
+export type PlayerInput = {
 	id: number;
 	firstname: string;
 	lastname: string;
 	gender: string | null;
 	playedGames: number;
+	present?: boolean;
 };
 
-type MatchHistoryInput = {
+export type MatchHistoryInput = {
 	matchId: number;
 	playerId: number;
 	team: number;
+	roundNumber: number;
+	status: "waiting" | "finished";
 };
 
-export function buildPartnershipMatrix(
-	history: MatchHistoryInput[],
-): Map<string, number> {
-	const matrix = new Map<string, number>();
-	const matchesMap = new Map<number, MatchHistoryInput[]>();
+export type GeneratedMatch = {
+	roundNumber: number;
+	court: number;
+	team1Ids: number[];
+	team2Ids: number[];
+};
 
+type Matrix = Map<string, number>;
+type Composition = number[][]; // Each group is [teammate, teammate, opponent, opponent].
+type Quality = number[];
+const pairKey = (a: number, b: number) => `${Math.min(a, b)},${Math.max(a, b)}`;
+
+function groupMatches(history: MatchHistoryInput[]) {
+	const groups = new Map<number, MatchHistoryInput[]>();
 	for (const row of history) {
-		if (!matchesMap.has(row.matchId)) matchesMap.set(row.matchId, []);
-		matchesMap.get(row.matchId)!.push(row);
+		const group = groups.get(row.matchId) ?? [];
+		group.push(row);
+		groups.set(row.matchId, group);
 	}
+	return groups;
+}
 
-	for (const [, participants] of matchesMap) {
-		const team1 = participants.filter((p) => p.team === 1);
-		const team2 = participants.filter((p) => p.team === 2);
-
-		for (const team of [team1, team2]) {
-			if (team.length === 2) {
-				const key = `${Math.min(team[0].playerId, team[1].playerId)},${Math.max(team[0].playerId, team[1].playerId)}`;
-				matrix.set(key, (matrix.get(key) || 0) + 1);
-			}
+// Planned matches affect composition frequencies, but never completed coverage.
+export function buildEncounterMatrices(history: MatchHistoryInput[]) {
+	const partnerships: Matrix = new Map();
+	const opponents: Matrix = new Map();
+	const increment = (matrix: Matrix, a: number, b: number) => {
+		const key = pairKey(a, b);
+		matrix.set(key, (matrix.get(key) ?? 0) + 1);
+	};
+	for (const group of groupMatches(history).values()) {
+		const first = group.filter((p) => p.team === 1);
+		const second = group.filter((p) => p.team === 2);
+		for (const team of [first, second]) {
+			if (team.length === 2)
+				increment(partnerships, team[0].playerId, team[1].playerId);
+		}
+		if (first.length === 2 && second.length === 2) {
+			for (const a of first)
+				for (const b of second) increment(opponents, a.playerId, b.playerId);
 		}
 	}
+	return { partnerships, opponents };
+}
 
-	return matrix;
+export function buildPartnershipMatrix(history: MatchHistoryInput[]) {
+	return buildEncounterMatrices(history).partnerships;
 }
 
 export function getCompletedPairsSet(
 	history: MatchHistoryInput[],
-): Set<string> {
-	const completed = new Set<string>();
-	const matchesMap = new Map<number, MatchHistoryInput[]>();
-
-	for (const row of history) {
-		if (!matchesMap.has(row.matchId)) matchesMap.set(row.matchId, []);
-		matchesMap.get(row.matchId)!.push(row);
-	}
-
-	for (const [, participants] of matchesMap) {
-		const team1 = participants.filter((p) => p.team === 1);
-		const team2 = participants.filter((p) => p.team === 2);
-
-		if (team1.length === 2) {
-			completed.add(
-				`${Math.min(team1[0].playerId, team1[1].playerId)},${Math.max(team1[0].playerId, team1[1].playerId)}`,
-			);
-		}
-		if (team2.length === 2) {
-			completed.add(
-				`${Math.min(team2[0].playerId, team2[1].playerId)},${Math.max(team2[0].playerId, team2[1].playerId)}`,
-			);
-		}
-	}
-
-	return completed;
-}
-
-export function generateRoundRobinRound(
-	allPlayers: PlayerInput[],
-	history: MatchHistoryInput[],
-	maxCourts: number,
-	nextRoundNumber: number,
+	population?: number[],
 ) {
-	const sortedPlayers = [...allPlayers].sort(
-		(a, b) => a.playedGames - b.playedGames,
-	);
-
-	const maxSlots = maxCourts * 4;
-	const totalPlayers = sortedPlayers.length;
-
-	let playersToPlay: number;
-	if (totalPlayers <= maxSlots) {
-		playersToPlay = totalPlayers % 2 === 0 ? totalPlayers : totalPlayers - 1;
-	} else {
-		playersToPlay = maxSlots % 2 === 0 ? maxSlots : maxSlots - 1;
-	}
-
-	if (playersToPlay < 4) {
-		throw new Error(
-			"Il n'y a pas assez de joueurs présents pour remplir au moins 1 terrain !",
-		);
-	}
-
-	const selectedPlayers = sortedPlayers.slice(0, playersToPlay);
-	const restingPlayers = sortedPlayers.slice(playersToPlay);
-
-	const partnershipMatrix = buildPartnershipMatrix(history);
-
-	const getCount = (p1Id: number, p2Id: number) =>
-		partnershipMatrix.get(
-			`${Math.min(p1Id, p2Id)},${Math.max(p1Id, p2Id)}`,
-		) || 0;
-
-	const pool = [...selectedPlayers];
-	const teams: PlayerInput[][] = [];
-
-	while (pool.length >= 2) {
-		const playerA = pool.shift()!;
-		let bestPartnerIndex = 0;
-		let minPartnerships = Infinity;
-
-		for (let i = 0; i < pool.length; i++) {
-			const count = getCount(playerA.id, pool[i].id);
-			if (count < minPartnerships) {
-				minPartnerships = count;
-				bestPartnerIndex = i;
-			}
+	const allowed = population ? new Set(population) : undefined;
+	const completed = new Set<string>();
+	for (const group of groupMatches(history).values()) {
+		if (!group.every((p) => p.status === "finished")) continue;
+		for (const teamNumber of [1, 2]) {
+			const team = group.filter((p) => p.team === teamNumber);
+			if (team.length !== 2 || team[0].playerId === team[1].playerId) continue;
+			const [a, b] = team.map((p) => p.playerId);
+			if (!allowed || (allowed.has(a) && allowed.has(b)))
+				completed.add(pairKey(a, b));
 		}
-
-		const playerB = pool.splice(bestPartnerIndex, 1)[0];
-		teams.push([playerA, playerB]);
 	}
-
-	const generatedMatches = [];
-	let courtNumber = 1;
-
-	while (teams.length >= 2) {
-		const team1 = teams.shift()!;
-		const team2 = teams.shift()!;
-
-		generatedMatches.push({
-			roundNumber: nextRoundNumber,
-			court: courtNumber,
-			team1Ids: team1.map((p) => p.id),
-			team2Ids: team2.map((p) => p.id),
-		});
-
-		courtNumber++;
-	}
-
-	return {
-		matches: generatedMatches,
-		restingPlayerIds: restingPlayers.map((p) => p.id),
-	};
+	return completed;
 }
 
 export function getRoundRobinProgress(
@@ -160,29 +96,233 @@ export function getRoundRobinProgress(
 	history: MatchHistoryInput[],
 	maxCourts: number,
 ) {
-	const completedPairs = getCompletedPairsSet(history);
-	const totalPlayers = allPlayers.length;
-	const totalPairs = (totalPlayers * (totalPlayers - 1)) / 2;
-	const completed = completedPairs.size;
-
-	const maxSlots = maxCourts * 4;
-	const effectivePlayers =
-		totalPlayers <= maxSlots ? totalPlayers : maxSlots;
-	const maxPairsPerRound = Math.floor(effectivePlayers / 2);
-
-	const remainingPairs = totalPairs - completed;
-	const estimatedRounds =
-		maxPairsPerRound > 0
-			? Math.ceil(remainingPairs / maxPairsPerRound)
-			: 0;
-
+	const population = [
+		...new Set(allPlayers.filter((p) => p.present !== false).map((p) => p.id)),
+	];
+	const totalPairs = (population.length * (population.length - 1)) / 2;
+	const completedPairs = getCompletedPairsSet(history, population).size;
+	const remainingPairs = totalPairs - completedPairs;
+	const matchesPerRound = Math.min(
+		Math.floor(maxCourts),
+		Math.floor(population.length / 4),
+	);
 	return {
+		populationSize: population.length,
 		totalPairs,
-		completedPairs: completed,
-		remainingPairs: Math.max(0, remainingPairs),
-		estimatedRounds: Math.max(0, estimatedRounds),
-		progress: totalPairs > 0 ? completed / totalPairs : 0,
+		completedPairs,
+		remainingPairs,
+		progress: totalPairs > 0 ? completedPairs / totalPairs : 0,
+		// A lower bound, not a promise that the heuristic can achieve it.
+		minimumRemainingRounds:
+			matchesPerRound > 0
+				? Math.ceil(remainingPairs / (matchesPerRound * 2))
+				: null,
+		// Avoid vacuous completion when there are too few players for a double.
+		complete: population.length >= 4 && remainingPairs === 0,
 	};
+}
+
+const compareNumbers = (a: number[], b: number[]) => {
+	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+	return 0;
+};
+
+function canonical(composition: Composition): Composition {
+	return composition
+		.map((match) => {
+			const first = match.slice(0, 2).sort((a, b) => a - b);
+			const second = match.slice(2).sort((a, b) => a - b);
+			return first[0] < second[0]
+				? [...first, ...second]
+				: [...second, ...first];
+		})
+		.sort(compareNumbers);
+}
+
+/**
+ * Strict lexicographic priorities: number of repeated partnerships, squared
+ * partnership frequencies, then the same two opponent criteria, then non-mixed
+ * teams. Squaring penalizes frequent repeats more strongly. Stable IDs break ties.
+ * Selection fairness is decided before this comparison and cannot be traded away.
+ */
+function compositionScorer(
+	history: MatchHistoryInput[],
+	players: PlayerInput[],
+	mixed: boolean,
+) {
+	const { partnerships, opponents } = buildEncounterMatrices(history);
+	const genders = new Map(players.map((p) => [p.id, p.gender]));
+	const nonMixed = (a: number, b: number) =>
+		mixed &&
+		!(
+			(genders.get(a) === "M" && genders.get(b) === "F") ||
+			(genders.get(a) === "F" && genders.get(b) === "M")
+		)
+			? 1
+			: 0;
+	const frequency = (matrix: Matrix, a: number, b: number) =>
+		matrix.get(pairKey(a, b)) ?? 0;
+	const score = (composition: Composition): Quality => {
+		const quality = [0, 0, 0, 0, 0];
+		for (const [a, b, c, d] of composition) {
+			for (const [x, y] of [
+				[a, b],
+				[c, d],
+			]) {
+				const count = frequency(partnerships, x, y);
+				quality[0] += Number(count > 0);
+				quality[1] += count * count;
+				quality[4] += nonMixed(x, y);
+			}
+			for (const [x, y] of [
+				[a, c],
+				[a, d],
+				[b, c],
+				[b, d],
+			]) {
+				const count = frequency(opponents, x, y);
+				quality[2] += Number(count > 0);
+				quality[3] += count * count;
+			}
+		}
+		return quality;
+	};
+	return { score, frequency, partnerships, opponents, nonMixed };
+}
+
+function compose(
+	selected: PlayerInput[],
+	history: MatchHistoryInput[],
+	mixed: boolean,
+) {
+	const ids = selected.map((p) => p.id).sort((a, b) => a - b);
+	const { score, frequency, partnerships, opponents, nonMixed } =
+		compositionScorer(history, selected, mixed);
+	let best: Composition = [];
+	let bestQuality: Quality | undefined;
+	const consider = (candidate: Composition) => {
+		const quality = score(candidate);
+		if (bestQuality && compareNumbers(quality, bestQuality) > 0) return false;
+		const normalized = canonical(candidate);
+		if (
+			!bestQuality ||
+			compareNumbers(quality, bestQuality) < 0 ||
+			compareNumbers(normalized.flat(), best.flat()) < 0
+		) {
+			best = normalized;
+			bestQuality = quality;
+			return true;
+		}
+		return false;
+	};
+	if (ids.length <= 8) {
+		// Exactly 3 compositions for four players, 315 for eight: cheap global search.
+		const enumerate = (remaining: number[], matches: Composition) => {
+			if (remaining.length === 0) {
+				consider(matches);
+				return;
+			}
+			const a = remaining[0];
+			for (let j = 1; j < remaining.length; j++) {
+				for (let k = 1; k < remaining.length; k++) {
+					if (k === j) continue;
+					for (let l = k + 1; l < remaining.length; l++) {
+						if (l === j) continue;
+						const taken = new Set([0, j, k, l]);
+						enumerate(
+							remaining.filter((_, i) => !taken.has(i)),
+							[...matches, [a, remaining[j], remaining[k], remaining[l]]],
+						);
+					}
+				}
+			}
+		};
+		enumerate(ids, []);
+		return best;
+	}
+
+	// Larger fields: four deterministic greedy starts, then at most 600 local
+	// exchanges each (3 passes). No global factorial search or optimality promise.
+	for (let seed = 0; seed < 4; seed++) {
+		const offset = Math.floor((ids.length * seed) / 4);
+		const pool = [...ids.slice(offset), ...ids.slice(0, offset)];
+		const teams: number[][] = [];
+		while (pool.length > 0) {
+			const a = pool.shift();
+			if (a === undefined) break;
+			pool.sort((b, c) => {
+				const bc = frequency(partnerships, a, b),
+					cc = frequency(partnerships, a, c);
+				return bc - cc || nonMixed(a, b) - nonMixed(a, c) || b - c;
+			});
+			const b = pool.shift();
+			if (b !== undefined) teams.push([a, b]);
+		}
+		const start: Composition = [];
+		while (teams.length > 0) {
+			const team = teams.shift();
+			if (!team) break;
+			const opposition = (other: number[]) => {
+				const counts = team.flatMap((a) =>
+					other.map((b) => frequency(opponents, a, b)),
+				);
+				return [
+					counts.filter((n) => n > 0).length,
+					counts.reduce((sum, n) => sum + n * n, 0),
+				];
+			};
+			teams.sort(
+				(a, b) =>
+					compareNumbers(opposition(a), opposition(b)) || compareNumbers(a, b),
+			);
+			const other = teams.shift();
+			if (other) start.push([...team, ...other]);
+		}
+		consider(start);
+		let current = canonical(start);
+		let budget = 600;
+		for (let pass = 0; pass < 3 && budget > 0; pass++) {
+			let next = current;
+			let nextQuality = score(current);
+			const trySwap = (candidate: Composition) => {
+				budget--;
+				const quality = score(candidate);
+				if (compareNumbers(quality, nextQuality) < 0) {
+					next = candidate;
+					nextQuality = quality;
+				}
+			};
+			// Exchange whole teams first: varies opponents without losing partners.
+			for (let i = 0; i < ids.length / 2 && budget > 0; i++)
+				for (let j = i + 1; j < ids.length / 2 && budget > 0; j++) {
+					const flat = current.flat();
+					[flat[2 * i], flat[2 * j]] = [flat[2 * j], flat[2 * i]];
+					[flat[2 * i + 1], flat[2 * j + 1]] = [
+						flat[2 * j + 1],
+						flat[2 * i + 1],
+					];
+					trySwap(
+						Array.from({ length: flat.length / 4 }, (_, k) =>
+							flat.slice(4 * k, 4 * k + 4),
+						),
+					);
+				}
+			for (let i = 0; i < ids.length && budget > 0; i++)
+				for (let j = i + 1; j < ids.length && budget > 0; j++) {
+					const flat = current.flat();
+					[flat[i], flat[j]] = [flat[j], flat[i]];
+					trySwap(
+						Array.from({ length: flat.length / 4 }, (_, k) =>
+							flat.slice(4 * k, 4 * k + 4),
+						),
+					);
+				}
+			consider(next);
+			if (next === current) break;
+			current = canonical(next);
+		}
+	}
+	return best;
 }
 
 export function generateRound(
@@ -192,133 +332,53 @@ export function generateRound(
 	nextRoundNumber: number,
 	maximizeParity: boolean,
 ) {
-	// ÉTAPE 1 : File d'attente classique pour l'équité
-	const sortedPlayers = [...allPlayers].sort(
-		(a, b) => a.playedGames - b.playedGames,
+	if (!Number.isInteger(maxCourts) || maxCourts < 1)
+		throw new Error("Le nombre de terrains doit être un entier positif.");
+	const present = allPlayers.filter((p) => p.present !== false);
+	if (new Set(present.map((p) => p.id)).size !== present.length)
+		throw new Error("La liste des joueurs contient des doublons.");
+	const lastSelection = new Map<number, number>();
+	for (const p of history)
+		lastSelection.set(
+			p.playerId,
+			Math.max(lastSelection.get(p.playerId) ?? -1, p.roundNumber),
+		);
+	const sorted = [...present].sort(
+		(a, b) =>
+			a.playedGames - b.playedGames ||
+			(lastSelection.get(a.id) ?? -1) - (lastSelection.get(b.id) ?? -1) ||
+			a.id - b.id,
 	);
-
-	const maxPlayersOnCourts = maxCourts * 4;
-	const maxMultipleOfFour = Math.floor(sortedPlayers.length / 4) * 4;
-	const playersToSelect = Math.min(maxPlayersOnCourts, maxMultipleOfFour);
-
-	if (playersToSelect < 4) {
+	const count = Math.min(maxCourts, Math.floor(sorted.length / 4)) * 4;
+	if (count < 4)
 		throw new Error(
 			"Il n'y a pas assez de joueurs présents pour remplir au moins 1 terrain !",
 		);
-	}
-
-	const selectedPlayers = sortedPlayers.slice(0, playersToSelect);
-	const restingPlayers = sortedPlayers.slice(playersToSelect);
-
-	// ÉTAPE 2 : Fonction historique pour compter les partenariats
-	const getPartnershipCount = (p1Id: number, p2Id: number): number => {
-		let count = 0;
-		const matchesMap = new Map<number, MatchHistoryInput[]>();
-		for (const row of history) {
-			if (!matchesMap.has(row.matchId)) matchesMap.set(row.matchId, []);
-			matchesMap.get(row.matchId)!.push(row);
-		}
-		for (const [_, participants] of matchesMap) {
-			const p1 = participants.find((p) => p.playerId === p1Id);
-			const p2 = participants.find((p) => p.playerId === p2Id);
-			if (p1 && p2 && p1.team === p2.team) {
-				count++;
-			}
-		}
-		return count;
-	};
-
-	const teams: PlayerInput[][] = [];
-
-	// ÉTAPE 3 : Création des paires (équipes)
-	if (maximizeParity) {
-		// --- LOGIQUE PARITÉ ACTIVE (Double mixte privilégié) ---
-		// On sépare notre groupe de sélectionnés en deux paniers : Hommes et Femmes
-		const men = selectedPlayers.filter((p) => p.gender === "M");
-		const women = selectedPlayers.filter((p) => p.gender === "F");
-
-		// Tant qu'on a au moins un homme et une femme disponibles, on les marie ensemble !
-		while (men.length > 0 && women.length > 0) {
-			const playerA = men.shift()!; // On prend le premier homme
-			let bestPartnerIndex = 0;
-			let minGamesTogether = Infinity;
-
-			// On cherche parmi les femmes celle avec qui il a le moins joué
-			for (let i = 0; i < women.length; i++) {
-				const gamesTogether = getPartnershipCount(playerA.id, women[i].id);
-				if (gamesTogether < minGamesTogether) {
-					minGamesTogether = gamesTogether;
-					bestPartnerIndex = i;
-				}
-			}
-
-			const playerB = women.splice(bestPartnerIndex, 1)[0];
-			teams.push([playerA, playerB]);
-		}
-
-		// S'il reste des joueurs du même sexe (ex: 12 hommes et 4 femmes sélectionnés),
-		// on apparie le reste des joueurs ensemble de manière classique
-		const remainingPool = [...men, ...women];
-		while (remainingPool.length > 0) {
-			const playerA = remainingPool.shift()!;
-			let bestPartnerIndex = 0;
-			let minGamesTogether = Infinity;
-
-			for (let i = 0; i < remainingPool.length; i++) {
-				const gamesTogether = getPartnershipCount(
-					playerA.id,
-					remainingPool[i].id,
-				);
-				if (gamesTogether < minGamesTogether) {
-					minGamesTogether = gamesTogether;
-					bestPartnerIndex = i;
-				}
-			}
-
-			const playerB = remainingPool.splice(bestPartnerIndex, 1)[0];
-			teams.push([playerA, playerB]);
-		}
-	} else {
-		// --- LOGIQUE STANDARD (Pas de contrainte de genre) ---
-		const pool = [...selectedPlayers];
-		while (pool.length > 0) {
-			const playerA = pool.shift()!;
-			let bestPartnerIndex = 0;
-			let minGamesTogether = Infinity;
-
-			for (let i = 0; i < pool.length; i++) {
-				const gamesTogether = getPartnershipCount(playerA.id, pool[i].id);
-				if (gamesTogether < minGamesTogether) {
-					minGamesTogether = gamesTogether;
-					bestPartnerIndex = i;
-				}
-			}
-
-			const playerB = pool.splice(bestPartnerIndex, 1)[0];
-			teams.push([playerA, playerB]);
-		}
-	}
-
-	// ÉTAPE 4 : Associer les paires deux par deux sur les terrains
-	const generatedMatches = [];
-	let courtNumber = 1;
-
-	while (teams.length >= 2) {
-		const team1 = teams.shift()!;
-		const team2 = teams.shift()!;
-
-		generatedMatches.push({
-			roundNumber: nextRoundNumber,
-			court: courtNumber,
-			team1Ids: team1.map((p) => p.id),
-			team2Ids: team2.map((p) => p.id),
-		});
-
-		courtNumber++;
-	}
-
+	const composition = compose(sorted.slice(0, count), history, maximizeParity);
 	return {
-		matches: generatedMatches,
-		restingPlayerIds: restingPlayers.map((p) => p.id),
+		matches: composition.map((group, index) => ({
+			roundNumber: nextRoundNumber,
+			court: index + 1,
+			team1Ids: group.slice(0, 2),
+			team2Ids: group.slice(2),
+		})),
+		restingPlayerIds: sorted.slice(count).map((p) => p.id),
 	};
+}
+
+// All formats share selection, partner/opponent diversity and mixed preference.
+export function generateRoundRobinRound(
+	allPlayers: PlayerInput[],
+	history: MatchHistoryInput[],
+	maxCourts: number,
+	nextRoundNumber: number,
+	maximizeParity = false,
+) {
+	return generateRound(
+		allPlayers,
+		history,
+		maxCourts,
+		nextRoundNumber,
+		maximizeParity,
+	);
 }
