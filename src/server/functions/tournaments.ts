@@ -17,7 +17,7 @@ import {
 } from "#/server/tournament-state";
 
 export const updateAvailableCourts = createServerFn({ method: "POST" })
-	.inputValidator((data: unknown) =>
+	.validator((data: unknown) =>
 		z.object({ courts: z.number().min(1).max(10) }).parse(data),
 	)
 	.handler(async ({ data }) => {
@@ -220,11 +220,11 @@ async function saveScore(
 }
 
 export const submitMatchScore = createServerFn({ method: "POST" })
-	.inputValidator(scoreSchema)
+	.validator(scoreSchema)
 	.handler(({ data }) => saveScore(data, false));
 
 export const updateMatchScore = createServerFn({ method: "POST" })
-	.inputValidator(scoreSchema)
+	.validator(scoreSchema)
 	.handler(({ data }) => saveScore(data, true));
 
 export const getCurrentRoundData = createServerFn({ method: "GET" }).handler(
@@ -559,7 +559,7 @@ export const finishTournament = createServerFn({ method: "POST" }).handler(
 
 // 1. SAUVEGARDER LES RÉGLAGES
 export const updateTournamentSettings = createServerFn({ method: "POST" })
-	.inputValidator(
+	.validator(
 		z.object({
 			roundType: z.enum(["infinite", "fixed", "roundrobin"]),
 			maxRounds: z.number().min(0),

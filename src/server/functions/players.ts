@@ -15,7 +15,7 @@ const playerSchema = z.object({
 });
 
 export const createPlayer = createServerFn({ method: "POST" })
-	.inputValidator(playerSchema)
+	.validator(playerSchema)
 	.handler(async ({ data }) => {
 		await db.insert(players).values({
 			firstname: data.firstname,
@@ -30,7 +30,7 @@ export const createPlayer = createServerFn({ method: "POST" })
 export const togglePlayerPresence = createServerFn({
 	method: "POST",
 })
-	.inputValidator(z.object({ playerId: z.number(), isPresent: z.boolean() }))
+	.validator(z.object({ playerId: z.number(), isPresent: z.boolean() }))
 	.handler(async ({ data }) => {
 		await db.transaction(async (tx) => {
 			await tx
@@ -47,7 +47,7 @@ export const togglePlayerPresence = createServerFn({
 	});
 
 export const deletePlayer = createServerFn({ method: "POST" })
-	.inputValidator(z.object({ playerId: z.number() }))
+	.validator(z.object({ playerId: z.number() }))
 	.handler(async ({ data }) => {
 		await db.transaction(async (tx) => {
 			const participant = await tx
